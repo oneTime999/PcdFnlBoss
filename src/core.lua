@@ -11,46 +11,47 @@ function Core:Init(App)
     }
 
     self.Player = self.Services.Players.LocalPlayer
+
     if not self.Player then
         error("[Pcd Fnl Boss] LocalPlayer not found")
     end
 
     self.Remotes = self.Services.ReplicatedStorage:WaitForChild("Remotes", 15)
+
     if not self.Remotes then
-        error("[Pcd Fnl Boss] ReplicatedStorage.Remotes was not found")
+        error("[Pcd Fnl Boss] ReplicatedStorage.Remotes not found")
     end
 
-    self.State = {
-        AutoBuyCapybaras = false,
-        AutoBuyGears = false,
-        AutoBuyMerchant = false,
-
-        SelectedMerchantItems = {},
-
-        AutoBoss = false,
-        SelectedBoss = App.Config.NormalBosses[1],
-
-        AutoEvent = false,
-        SelectedEventBoss = App.Config.EventBosses[1],
-    }
-
+    self.Enabled = {}
     self.Workers = {}
+
     self.RemoteBusy = {}
     self.RemoteLastCall = {}
+
     self.LastWarnings = {}
     self.Destroyed = false
 end
 
-function Core:WarnThrottled(key, message, cooldown)
-    cooldown = cooldown or 5
+function Core:SetEnabled(key, value)
+    self.Enabled[key] = value == true
+end
+
+function Core:IsEnabled(key)
+    return self.Enabled[key] == true
+end
+
+function Core:Warn(key, message, cooldown)
+    cooldown = tonumber(cooldown) or 5
 
     local now = os.clock()
     local last = self.LastWarnings[key] or 0
 
-    if now - last >= cooldown then
-        self.LastWarnings[key] = now
-        warn("[Pcd Fnl Boss][" .. tostring(key) .. "] " .. tostring(message))
+    if now - last < cooldown then
+        return
     end
+
+    self.LastWarnings[key] = now
+    warn("[Pcd Fnl Boss][" .. tostring(key) .. "] " .. tostring(message))
 end
 
 function Core:IsWorkerRunning(name)
@@ -59,11 +60,7 @@ function Core:IsWorkerRunning(name)
 end
 
 function Core:StartWorker(name, callback)
-    if self.Destroyed then
-        return false
-    end
-
-    if self:IsWorkerRunning(name) then
+    if self.Destroyed or self:IsWorkerRunning(name) then
         return false
     end
 
@@ -74,14 +71,17 @@ function Core:StartWorker(name, callback)
     self.Workers[name] = token
 
     task.spawn(function()
-        while not token.Cancelled and not self.Destroyed and self.Workers[name] == token do
+        while not self.Destroyed
+            and not token.Cancelled
+            and self.Workers[name] == token do
+
             local ok, result = pcall(callback, token)
 
             if not ok then
-                self:WarnThrottled(name, result, 2)
+                self:Warn("Worker:" .. name, result, 2)
 
-                local errorDelay = tonumber(self.App.Config.WorkerErrorDelay) or 1
-                task.wait(math.max(errorDelay, 0.1))
+                local delay = tonumber(self.App.Config.Timing.WorkerErrorDelay) or 1
+                task.wait(math.max(delay, 0.1))
             else
                 if result == false then
                     break
@@ -123,35 +123,9 @@ function Core:StopAll()
         self.Workers[name] = nil
     end
 
-    if self.State then
-        self.State.AutoBuyCapybaras = false
-        self.State.AutoBuyGears = false
-        self.State.AutoBuyMerchant = false
-        self.State.AutoBoss = false
-        self.State.AutoEvent = false
+    for key in pairs(self.Enabled) do
+        self.Enabled[key] = false
     end
-end
-
-function Core:SetMerchantSelection(options)
-    local selected = {}
-
-    if type(options) == "table" then
-        for _, itemName in ipairs(options) do
-            if type(itemName) == "string" and itemName ~= "" then
-                selected[string.lower(itemName)] = true
-            end
-        end
-    end
-
-    self.State.SelectedMerchantItems = selected
-end
-
-function Core:IsMerchantSelected(itemName)
-    if type(itemName) ~= "string" then
-        return false
-    end
-
-    return self.State.SelectedMerchantItems[string.lower(itemName)] == true
 end
 
 function Core:GetRemote(name)
@@ -170,8 +144,8 @@ function Core:CallRemote(remoteName, minInterval, ...)
     local remote = self:GetRemote(remoteName)
 
     if not remote then
-        self:WarnThrottled("Remote:" .. remoteName, "Remote not found", 5)
-        return false, "Remote not found: " .. remoteName
+        self:Warn("Remote:" .. remoteName, "Remote not found", 5)
+        return false, "Remote not found"
     end
 
     local args = table.pack(...)
@@ -187,9 +161,8 @@ function Core:CallRemote(remoteName, minInterval, ...)
     self.RemoteBusy[remoteName] = true
 
     local interval = tonumber(minInterval) or 0
-    local lastCall = self.RemoteLastCall[remoteName] or 0
-    local elapsed = os.clock() - lastCall
-    local remaining = interval - elapsed
+    local last = self.RemoteLastCall[remoteName] or 0
+    local remaining = interval - (os.clock() - last)
 
     if remaining > 0 then
         task.wait(remaining)
@@ -212,7 +185,7 @@ function Core:CallRemote(remoteName, minInterval, ...)
     self.RemoteBusy[remoteName] = nil
 
     if not ok then
-        self:WarnThrottled("Remote:" .. remoteName, result, 2)
+        self:Warn("Remote:" .. remoteName, result, 2)
         return false, result
     end
 
@@ -220,6 +193,10 @@ function Core:CallRemote(remoteName, minInterval, ...)
 end
 
 function Core:Destroy()
+    if self.Destroyed then
+        return
+    end
+
     self.Destroyed = true
     self:StopAll()
 
