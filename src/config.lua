@@ -109,10 +109,10 @@ Config.BossGroups = {
         ButtonLabel = "Summon Selected Event Bosses",
 
         Options = {
-            "Dr Carrot",
-            "Dr Carrot MkI",
-            "Dr Carrot MkII",
-            "Dr Carrot MkIII",
+            "Dr Carbot",
+            "Dr Carbot MkI",
+            "Dr Carbot MkII",
+            "Dr Carbot MkIII",
         },
     },
 }
