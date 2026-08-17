@@ -1,9 +1,53 @@
 local AutoBuy = {}
 
+local function trim(value)
+    if type(value) ~= "string" then
+        return nil
+    end
+
+    local cleaned = value:match("^%s*(.-)%s*$")
+
+    if cleaned == "" then
+        return nil
+    end
+
+    return cleaned
+end
+
+local function sameArray(a, b)
+    if #a ~= #b then
+        return false
+    end
+
+    for index = 1, #a do
+        if a[index] ~= b[index] then
+            return false
+        end
+    end
+
+    return true
+end
+
 function AutoBuy:Init(App)
     self.App = App
-    self.Core = App.Core
     self.Config = App.Config
+    self.Core = App.Core
+    self.Selection = App.Selection
+
+    self.OptionCache = {}
+    self.RecentPurchases = {}
+end
+
+function AutoBuy:FeatureKey(shopKey)
+    return "Shop:" .. shopKey
+end
+
+function AutoBuy:SelectionKey(shopKey)
+    return "Shop:" .. shopKey
+end
+
+function AutoBuy:GetShopConfig(shopKey)
+    return self.Config.Shops[shopKey]
 end
 
 function AutoBuy:GetPlayerGui()
@@ -13,7 +57,8 @@ function AutoBuy:GetPlayerGui()
         return nil
     end
 
-    return player:FindFirstChildOfClass("PlayerGui") or player:FindFirstChild("PlayerGui")
+    return player:FindFirstChildOfClass("PlayerGui")
+        or player:FindFirstChild("PlayerGui")
 end
 
 function AutoBuy:GetFrames()
@@ -38,14 +83,21 @@ function AutoBuy:GetFrames()
     return root:FindFirstChild("Frames")
 end
 
-function AutoBuy:GetShopList(shopName)
+function AutoBuy:GetShopList(shopKey)
+    local shopConfig = self:GetShopConfig(shopKey)
+
+    if not shopConfig then
+        return nil
+    end
+
     local frames = self:GetFrames()
 
     if not frames then
         return nil
     end
 
-    local shop = frames:FindFirstChild(shopName) or frames:FindFirstChild(shopName, true)
+    local shop = frames:FindFirstChild(shopConfig.UIName)
+        or frames:FindFirstChild(shopConfig.UIName, true)
 
     if not shop then
         return nil
@@ -65,17 +117,11 @@ function AutoBuy:GetText(instance)
         return nil
     end
 
-    local text = instance.Text
-
-    if type(text) ~= "string" or text == "" then
-        return nil
-    end
-
-    return text
+    return trim(instance.Text)
 end
 
-function AutoBuy:GetItemName(item)
-    local candidates = {
+function AutoBuy:GetItemName(card)
+    local preferredNames = {
         "Title",
         "ItemName",
         "ItemTitle",
@@ -83,8 +129,8 @@ function AutoBuy:GetItemName(item)
         "DisplayName",
     }
 
-    for _, candidate in ipairs(candidates) do
-        local object = item:FindFirstChild(candidate, true)
+    for _, objectName in ipairs(preferredNames) do
+        local object = card:FindFirstChild(objectName, true)
         local text = self:GetText(object)
 
         if text then
@@ -92,21 +138,22 @@ function AutoBuy:GetItemName(item)
         end
     end
 
-    for _, object in ipairs(item:GetDescendants()) do
+    for _, object in ipairs(card:GetDescendants()) do
         local text = self:GetText(object)
 
         if text then
             local objectName = string.lower(object.Name)
-            local lowerText = string.lower(text)
+            local lower = string.lower(text)
 
             local ignored =
                 objectName == "stock"
                 or objectName == "price"
                 or objectName == "cost"
                 or objectName == "amount"
-                or string.find(lowerText, "in stock", 1, true)
-                or string.find(lowerText, "no stock", 1, true)
-                or string.find(lowerText, "sold out", 1, true)
+                or string.find(lower, "in stock", 1, true)
+                or string.find(lower, "no stock", 1, true)
+                or string.find(lower, "out of stock", 1, true)
+                or string.find(lower, "sold out", 1, true)
 
             if not ignored then
                 return text
@@ -114,7 +161,7 @@ function AutoBuy:GetItemName(item)
         end
     end
 
-    return item.Name
+    return trim(card.Name)
 end
 
 function AutoBuy:ParseStock(stockText)
@@ -157,14 +204,17 @@ function AutoBuy:GetCardFromStock(list, stockObject)
         current = current.Parent
     end
 
-    if current and current.Parent == list and current:IsA("GuiObject") then
+    if current
+        and current.Parent == list
+        and current:IsA("GuiObject") then
         return current
     end
 
     return nil
 end
 
-function AutoBuy:GetStockEntries(list)
+function AutoBuy:GetStockEntries(shopKey)
+    local list = self:GetShopList(shopKey)
     local entries = {}
 
     if not list then
@@ -183,15 +233,19 @@ function AutoBuy:GetStockEntries(list)
                 if card and not seen[card] then
                     seen[card] = true
 
-                    local amount, inStock = self:ParseStock(stockText)
+                    local name = self:GetItemName(card)
 
-                    entries[#entries + 1] = {
-                        Instance = card,
-                        Name = self:GetItemName(card),
-                        StockText = stockText,
-                        Amount = amount,
-                        InStock = inStock,
-                    }
+                    if name then
+                        local amount, inStock = self:ParseStock(stockText)
+
+                        entries[#entries + 1] = {
+                            Name = name,
+                            StockText = stockText,
+                            Amount = amount,
+                            InStock = inStock,
+                            Instance = card,
+                        }
+                    end
                 end
             end
         end
@@ -200,144 +254,168 @@ function AutoBuy:GetStockEntries(list)
     return entries
 end
 
-function AutoBuy:BuyItem(itemName)
-    return self.Core:CallRemote(
-        "BuyItem",
-        self.Config.BuyRemoteDelay,
-        itemName
-    )
+function AutoBuy:GetAvailableOptions(shopKey)
+    local shopConfig = self:GetShopConfig(shopKey)
+
+    if not shopConfig then
+        return {}
+    end
+
+    if shopConfig.DynamicOptions ~= true then
+        local options = {}
+
+        for _, option in ipairs(shopConfig.Options or {}) do
+            options[#options + 1] = option
+        end
+
+        return options
+    end
+
+    local options = {}
+    local seen = {}
+
+    for _, entry in ipairs(self:GetStockEntries(shopKey)) do
+        local normalized = string.lower(entry.Name)
+
+        if not seen[normalized] then
+            seen[normalized] = true
+            options[#options + 1] = entry.Name
+        end
+    end
+
+    table.sort(options, function(a, b)
+        return string.lower(a) < string.lower(b)
+    end)
+
+    local cached = self.OptionCache[shopKey] or {}
+
+    if #options == 0 and #cached > 0 then
+        return cached
+    end
+
+    if not sameArray(options, cached) then
+        self.OptionCache[shopKey] = options
+    end
+
+    return options
 end
 
-function AutoBuy:BuyMerchantItem(itemName)
-    return self.Core:CallRemote(
-        "BuyMerchantItem",
-        self.Config.BuyRemoteDelay,
-        itemName
-    )
+function AutoBuy:IsSameStockRecentlyPurchased(shopKey, entry)
+    local shopCache = self.RecentPurchases[shopKey]
+
+    if not shopCache then
+        shopCache = {}
+        self.RecentPurchases[shopKey] = shopCache
+    end
+
+    local key = string.lower(entry.Name)
+    local record = shopCache[key]
+
+    if not record then
+        return false
+    end
+
+    local cooldown = tonumber(self.Config.Timing.SameStockCooldown) or 2.5
+
+    return record.StockText == entry.StockText
+        and (os.clock() - record.Time) < cooldown
 end
 
-function AutoBuy:PurchaseEntry(entry, stateKey, buyer)
-    if not entry or not entry.InStock then
+function AutoBuy:MarkPurchased(shopKey, entry)
+    local shopCache = self.RecentPurchases[shopKey]
+
+    if not shopCache then
+        shopCache = {}
+        self.RecentPurchases[shopKey] = shopCache
+    end
+
+    shopCache[string.lower(entry.Name)] = {
+        StockText = entry.StockText,
+        Time = os.clock(),
+    }
+end
+
+function AutoBuy:PurchaseEntry(shopKey, entry)
+    local shopConfig = self:GetShopConfig(shopKey)
+
+    if not shopConfig or not entry.InStock then
         return
     end
 
-    local amount = tonumber(entry.Amount) or 0
+    if self:IsSameStockRecentlyPurchased(shopKey, entry) then
+        return
+    end
+
+    local featureKey = self:FeatureKey(shopKey)
+    local amount = math.max(0, tonumber(entry.Amount) or 0)
 
     if amount <= 0 then
         return
     end
 
     for _ = 1, amount do
-        if not self.Core.State[stateKey] then
+        if not self.Core:IsEnabled(featureKey) then
             return
         end
 
-        local ok, result = buyer(entry.Name)
+        local ok, result = self.Core:CallRemote(
+            shopConfig.Remote,
+            self.Config.Timing.BuyRemote,
+            entry.Name
+        )
 
         if not ok or result == false then
-            return
+            break
         end
     end
+
+    self:MarkPurchased(shopKey, entry)
 end
 
-function AutoBuy:RunShop(shopName, stateKey, buyer, predicate)
-    local list = self:GetShopList(shopName)
+function AutoBuy:RunCycle(shopKey)
+    local selectionKey = self:SelectionKey(shopKey)
 
-    if not list then
-        self.Core:WarnThrottled(
-            "Shop:" .. shopName,
-            "Shop list not found: " .. shopName,
-            10
-        )
+    if #self.Selection:Get(selectionKey) == 0 then
         return
     end
 
-    local entries = self:GetStockEntries(list)
-
-    for _, entry in ipairs(entries) do
-        if not self.Core.State[stateKey] then
+    for _, entry in ipairs(self:GetStockEntries(shopKey)) do
+        if not self.Core:IsEnabled(self:FeatureKey(shopKey)) then
             return
         end
 
-        local shouldBuy = true
-
-        if predicate then
-            shouldBuy = predicate(entry)
-        end
-
-        if shouldBuy then
-            self:PurchaseEntry(entry, stateKey, buyer)
+        if self.Selection:Contains(selectionKey, entry.Name) then
+            self:PurchaseEntry(shopKey, entry)
         end
     end
 end
 
-function AutoBuy:StartCapybaras()
-    self.Core:StartWorker("AutoBuyCapybaras", function()
-        if not self.Core.State.AutoBuyCapybaras then
+function AutoBuy:Start(shopKey)
+    local shopConfig = self:GetShopConfig(shopKey)
+
+    if not shopConfig then
+        return false
+    end
+
+    local featureKey = self:FeatureKey(shopKey)
+    local workerName = "AutoBuy:" .. shopKey
+
+    self.Core:SetEnabled(featureKey, true)
+
+    return self.Core:StartWorker(workerName, function()
+        if not self.Core:IsEnabled(featureKey) then
             return false
         end
 
-        self:RunShop(
-            self.Config.ShopNames.Capybaras,
-            "AutoBuyCapybaras",
-            function(itemName)
-                return self:BuyItem(itemName)
-            end
-        )
+        self:RunCycle(shopKey)
 
-        return self.Config.BuyInterval
+        return self.Config.Timing.BuyLoop
     end)
 end
 
-function AutoBuy:StopCapybaras()
-    self.Core:StopWorker("AutoBuyCapybaras")
-end
-
-function AutoBuy:StartGears()
-    self.Core:StartWorker("AutoBuyGears", function()
-        if not self.Core.State.AutoBuyGears then
-            return false
-        end
-
-        self:RunShop(
-            self.Config.ShopNames.Gears,
-            "AutoBuyGears",
-            function(itemName)
-                return self:BuyItem(itemName)
-            end
-        )
-
-        return self.Config.BuyInterval
-    end)
-end
-
-function AutoBuy:StopGears()
-    self.Core:StopWorker("AutoBuyGears")
-end
-
-function AutoBuy:StartMerchant()
-    self.Core:StartWorker("AutoBuyMerchant", function()
-        if not self.Core.State.AutoBuyMerchant then
-            return false
-        end
-
-        self:RunShop(
-            self.Config.ShopNames.Merchant,
-            "AutoBuyMerchant",
-            function(itemName)
-                return self:BuyMerchantItem(itemName)
-            end,
-            function(entry)
-                return self.Core:IsMerchantSelected(entry.Name)
-            end
-        )
-
-        return self.Config.BuyInterval
-    end)
-end
-
-function AutoBuy:StopMerchant()
-    self.Core:StopWorker("AutoBuyMerchant")
+function AutoBuy:Stop(shopKey)
+    self.Core:SetEnabled(self:FeatureKey(shopKey), false)
+    self.Core:StopWorker("AutoBuy:" .. shopKey)
 end
 
 return AutoBuy
