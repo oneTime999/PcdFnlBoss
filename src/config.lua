@@ -1,6 +1,6 @@
 local Config = {}
 
-Config.Version = "2.0.0"
+Config.Version = "2.0.1"
 
 Config.UI = {
     Title = "Pcd Fnl Boss",
@@ -109,10 +109,10 @@ Config.BossGroups = {
         ButtonLabel = "Summon Selected Event Bosses",
 
         Options = {
-            "Dr Carbot",
-            "Dr Carbot MkI",
-            "Dr Carbot MkII",
-            "Dr Carbot MkIII",
+            "Dr Carrot",
+            "Dr Carrot MkI",
+            "Dr Carrot MkII",
+            "Dr Carrot MkIII",
         },
     },
 }
