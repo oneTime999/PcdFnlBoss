@@ -1,7 +1,23 @@
-local BASE_URL = "https://raw.githubusercontent.com/SEU_USUARIO/SEU_REPOSITORIO/main/src/"
+local BASE_URL = "https://raw.githubusercontent.com/oneTime999/PcdFnlBoss/refs/heads/main/src/"
 
 local function LoadModule(name)
-    return loadstring(game:HttpGet(BASE_URL .. name .. ".lua"))()
+    local url = BASE_URL .. name .. ".lua"
+
+    local success, source = pcall(function()
+        return game:HttpGet(url)
+    end)
+
+    if not success then
+        error("[Pcd Fnl Boss] Failed to download module '" .. name .. "': " .. tostring(source))
+    end
+
+    local compiled, compileError = loadstring(source)
+
+    if not compiled then
+        error("[Pcd Fnl Boss] Failed to compile module '" .. name .. "': " .. tostring(compileError))
+    end
+
+    return compiled()
 end
 
 local Config = LoadModule("config")
