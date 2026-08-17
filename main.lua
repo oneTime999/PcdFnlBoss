@@ -1,5 +1,5 @@
 local BASE_URL = "https://raw.githubusercontent.com/oneTime999/PcdFnlBoss/refs/heads/main/src/"
-local BUILD = "1.4.0"
+local BUILD = "1.5.0"
 
 local ENV = (getgenv and getgenv()) or _G
 local CACHE_BUSTER = tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999))
