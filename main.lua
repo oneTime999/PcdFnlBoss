@@ -1,110 +1,121 @@
 local BASE_URL = "https://raw.githubusercontent.com/oneTime999/PcdFnlBoss/refs/heads/main/src/"
-local BUILD = "1.5.0"
-
 local ENV = (getgenv and getgenv()) or _G
-local CACHE_BUSTER = tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999))
 
-local function safeCleanup(app)
-    if type(app) ~= "table" then
+local function cleanupOldApp()
+    local old = ENV.PcdFnlBossApp
+
+    if type(old) ~= "table" then
         return
     end
 
     pcall(function()
-        if app.Core and app.Core.StopAll then
-            app.Core:StopAll()
+        if old.Core and old.Core.Destroy then
+            old.Core:Destroy()
+        elseif old.Core and old.Core.StopAll then
+            old.Core:StopAll()
         end
     end)
 
     pcall(function()
-        if app.Rayfield and app.Rayfield.Destroy then
-            app.Rayfield:Destroy()
+        if old.Rayfield and old.Rayfield.Destroy then
+            old.Rayfield:Destroy()
         end
     end)
 
-    -- Compatibility cleanup for builds that still used Starlight.
     pcall(function()
-        if app.Starlight and app.Starlight.Destroy then
-            app.Starlight:Destroy()
+        if old.Starlight and old.Starlight.Destroy then
+            old.Starlight:Destroy()
         end
     end)
-end
 
-if ENV.PcdFnlBossApp then
-    safeCleanup(ENV.PcdFnlBossApp)
     ENV.PcdFnlBossApp = nil
     task.wait(0.15)
 end
 
-local function loadModule(name)
-    local url = BASE_URL .. name .. ".lua?build=" .. BUILD .. "&cb=" .. CACHE_BUSTER
+local function loadModule(name, cacheToken)
+    local url = BASE_URL .. name .. ".lua?cb=" .. cacheToken
 
-    local ok, source = pcall(function()
+    local httpOk, source = pcall(function()
         return game:HttpGet(url)
     end)
 
-    if not ok then
-        error("[Pcd Fnl Boss] HTTP error while loading " .. name .. ": " .. tostring(source))
+    if not httpOk then
+        error("[Pcd Fnl Boss] HTTP error [" .. name .. "]: " .. tostring(source))
     end
 
     if type(source) ~= "string" or source == "" then
-        error("[Pcd Fnl Boss] Empty source returned for module: " .. name)
+        error("[Pcd Fnl Boss] Empty module [" .. name .. "]")
     end
 
-    local lower = string.lower(source:sub(1, 200))
+    local head = string.lower(source:sub(1, 256))
 
-    if string.find(lower, "<!doctype", 1, true)
-        or string.find(lower, "<html", 1, true) then
-        error("[Pcd Fnl Boss] Invalid HTML response while loading module: " .. name)
+    if string.find(head, "<!doctype", 1, true)
+        or string.find(head, "<html", 1, true) then
+        error("[Pcd Fnl Boss] Invalid HTML response [" .. name .. "]")
     end
 
     local chunk, compileError = loadstring(source)
 
     if not chunk then
-        error("[Pcd Fnl Boss] Compile error in " .. name .. ": " .. tostring(compileError))
+        error("[Pcd Fnl Boss] Compile error [" .. name .. "]: " .. tostring(compileError))
     end
 
     local runOk, module = pcall(chunk)
 
     if not runOk then
-        error("[Pcd Fnl Boss] Runtime error in " .. name .. ": " .. tostring(module))
+        error("[Pcd Fnl Boss] Runtime error [" .. name .. "]: " .. tostring(module))
     end
 
     if type(module) ~= "table" then
-        error("[Pcd Fnl Boss] Module " .. name .. " did not return a table")
+        error("[Pcd Fnl Boss] Invalid module [" .. name .. "]: expected table")
     end
 
     return module
 end
 
-print("[Pcd Fnl Boss] Starting v" .. BUILD)
+cleanupOldApp()
 
-local Config = loadModule("config")
-local Core = loadModule("core")
-local AutoBuy = loadModule("autobuy")
-local Bosses = loadModule("bosses")
-local UI = loadModule("ui")
+local cacheToken = tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999))
+
+local Config = loadModule("config", cacheToken)
+local Core = loadModule("core", cacheToken)
+local Selection = loadModule("selection", cacheToken)
+local AutoBuy = loadModule("autobuy", cacheToken)
+local Bosses = loadModule("bosses", cacheToken)
+local UI = loadModule("ui", cacheToken)
 
 local App = {
-    Build = BUILD,
     Config = Config,
     Core = Core,
+    Selection = Selection,
     AutoBuy = AutoBuy,
     Bosses = Bosses,
+    UI = UI,
 }
 
 ENV.PcdFnlBossApp = App
 
-local ok, err = pcall(function()
+local startupOk, startupError = pcall(function()
     Core:Init(App)
+    Selection:Init(App)
     AutoBuy:Init(App)
     Bosses:Init(App)
     UI:Init(App)
 end)
 
-if not ok then
-    safeCleanup(App)
+if not startupOk then
+    pcall(function()
+        Core:Destroy()
+    end)
+
+    pcall(function()
+        if App.Rayfield and App.Rayfield.Destroy then
+            App.Rayfield:Destroy()
+        end
+    end)
+
     ENV.PcdFnlBossApp = nil
-    error("[Pcd Fnl Boss] Startup failed: " .. tostring(err))
+    error("[Pcd Fnl Boss] Startup failed: " .. tostring(startupError))
 end
 
-print("[Pcd Fnl Boss] Loaded successfully - v" .. BUILD)
+print("[Pcd Fnl Boss] Loaded v" .. tostring(Config.Version))
