@@ -4,7 +4,6 @@ function Bosses:Init(App)
     self.App = App
     self.Core = App.Core
     self.Config = App.Config
-    self.EventIndex = 1
 end
 
 function Bosses:Summon(name)
@@ -41,30 +40,15 @@ function Bosses:StopNormal()
 end
 
 function Bosses:StartEvent()
-    self.EventIndex = 1
-
     self.Core:StartWorker("EventBoss", function()
         if not self.Core.State.AutoEvent then
             return false
         end
 
-        local bosses = self.Config.EventBosses
+        local boss = self.Core.State.SelectedEventBoss
 
-        if #bosses == 0 then
-            return false
-        end
-
-        if self.EventIndex > #bosses then
-            self.EventIndex = 1
-        end
-
-        local boss = bosses[self.EventIndex]
-        self:Summon(boss)
-
-        self.EventIndex = self.EventIndex + 1
-
-        if self.EventIndex > #bosses then
-            self.EventIndex = 1
+        if boss then
+            self:Summon(boss)
         end
 
         return self.Config.BossInterval
