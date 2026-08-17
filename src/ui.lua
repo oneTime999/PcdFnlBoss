@@ -1,28 +1,45 @@
 local UI = {}
 
-local RAYFIELD_URL = "https://sirius.menu/rayfield"
+local PLACEHOLDER = "Waiting for shop items..."
+
+local function sameArray(a, b)
+    if #a ~= #b then
+        return false
+    end
+
+    for index = 1, #a do
+        if a[index] ~= b[index] then
+            return false
+        end
+    end
+
+    return true
+end
 
 function UI:Init(App)
     self.App = App
+    self.Config = App.Config
     self.Core = App.Core
+    self.Selection = App.Selection
     self.AutoBuy = App.AutoBuy
     self.Bosses = App.Bosses
-    self.Config = App.Config
+
+    self.DynamicDropdowns = {}
 
     self:CreateWindow()
 end
 
 function UI:LoadRayfield()
     local ok, source = pcall(function()
-        return game:HttpGet(RAYFIELD_URL)
+        return game:HttpGet(self.Config.UI.RayfieldURL)
     end)
 
     if not ok then
-        error("[Pcd Fnl Boss] Failed to download Rayfield: " .. tostring(source))
+        error("[Pcd Fnl Boss] Rayfield HTTP error: " .. tostring(source))
     end
 
     if type(source) ~= "string" or source == "" then
-        error("[Pcd Fnl Boss] Rayfield returned an empty source")
+        error("[Pcd Fnl Boss] Rayfield returned empty source")
     end
 
     local chunk, compileError = loadstring(source)
@@ -33,15 +50,146 @@ function UI:LoadRayfield()
 
     local runOk, Rayfield = pcall(chunk)
 
-    if not runOk then
+    if not runOk or type(Rayfield) ~= "table" then
         error("[Pcd Fnl Boss] Rayfield runtime error: " .. tostring(Rayfield))
     end
 
-    if type(Rayfield) ~= "table" then
-        error("[Pcd Fnl Boss] Rayfield did not return a valid library table")
+    return Rayfield
+end
+
+function UI:CleanDropdownValues(values)
+    local cleaned = {}
+
+    for _, value in ipairs(self.Selection:Normalize(values)) do
+        if value ~= PLACEHOLDER then
+            cleaned[#cleaned + 1] = value
+        end
     end
 
-    return Rayfield
+    return cleaned
+end
+
+function UI:CreateShopControls(tab, shopKey)
+    local shop = self.Config.Shops[shopKey]
+
+    if not shop then
+        return
+    end
+
+    tab:CreateSection(shop.Label)
+
+    local selectionKey = self.AutoBuy:SelectionKey(shopKey)
+    local initialOptions = self.AutoBuy:GetAvailableOptions(shopKey)
+
+    local displayOptions = initialOptions
+
+    if #displayOptions == 0 then
+        displayOptions = {PLACEHOLDER}
+    end
+
+    local dropdown = tab:CreateDropdown({
+        Name = shop.DropdownLabel,
+        Options = displayOptions,
+        CurrentOption = {},
+        MultipleOptions = true,
+        Flag = "ShopSelection_" .. shopKey,
+
+        Callback = function(options)
+            self.Selection:Set(
+                selectionKey,
+                self:CleanDropdownValues(options)
+            )
+        end,
+    })
+
+    tab:CreateToggle({
+        Name = shop.ToggleLabel,
+        CurrentValue = false,
+        Flag = "ShopToggle_" .. shopKey,
+
+        Callback = function(value)
+            if value then
+                self.AutoBuy:Start(shopKey)
+            else
+                self.AutoBuy:Stop(shopKey)
+            end
+        end,
+    })
+
+    if shop.DynamicOptions == true then
+        self.DynamicDropdowns[shopKey] = {
+            Dropdown = dropdown,
+            LastOptions = initialOptions,
+        }
+    end
+end
+
+function UI:CreateBossControls(tab, groupKey)
+    local group = self.Config.BossGroups[groupKey]
+
+    if not group then
+        return
+    end
+
+    tab:CreateSection(group.Section)
+
+    local selectionKey = self.Bosses:SelectionKey(groupKey)
+
+    tab:CreateDropdown({
+        Name = group.DropdownLabel,
+        Options = group.Options,
+        CurrentOption = {},
+        MultipleOptions = true,
+        Flag = "BossSelection_" .. groupKey,
+
+        Callback = function(options)
+            self.Selection:Set(selectionKey, options)
+        end,
+    })
+
+    tab:CreateToggle({
+        Name = group.ToggleLabel,
+        CurrentValue = false,
+        Flag = "BossToggle_" .. groupKey,
+
+        Callback = function(value)
+            if value then
+                self.Bosses:Start(groupKey)
+            else
+                self.Bosses:Stop(groupKey)
+            end
+        end,
+    })
+
+    tab:CreateButton({
+        Name = group.ButtonLabel,
+
+        Callback = function()
+            self.Bosses:SummonSelectedOnce(groupKey)
+        end,
+    })
+end
+
+function UI:StartDynamicDropdownSync()
+    self.Core:StartWorker("UI:DynamicShopOptions", function()
+        for shopKey, state in pairs(self.DynamicDropdowns) do
+            local options = self.AutoBuy:GetAvailableOptions(shopKey)
+
+            if #options > 0 and not sameArray(options, state.LastOptions) then
+                local selected = self.Selection:FilterToOptions(
+                    self.AutoBuy:SelectionKey(shopKey),
+                    options
+                )
+
+                state.Dropdown:Refresh(options)
+                state.Dropdown:Set(selected)
+
+                state.LastOptions = options
+            end
+        end
+
+        return self.Config.Timing.DynamicOptionsRefresh
+    end)
 end
 
 function UI:CreateWindow()
@@ -51,16 +199,17 @@ function UI:CreateWindow()
     self.App.Rayfield = Rayfield
 
     local Window = Rayfield:CreateWindow({
-        Name = self.Config.Title,
+        Name = self.Config.UI.Title,
         Icon = 0,
 
-        LoadingTitle = self.Config.Title,
-        LoadingSubtitle = "v" .. self.Config.Version .. " • by " .. self.Config.Author,
+        LoadingTitle = self.Config.UI.Title,
+        LoadingSubtitle =
+            "v" .. self.Config.Version .. " • by " .. self.Config.UI.Author,
 
-        ShowText = "Pcd Fnl Boss",
-        Theme = "Default",
+        ShowText = self.Config.UI.Title,
+        Theme = self.Config.UI.Theme,
 
-        ToggleUIKeybind = "K",
+        ToggleUIKeybind = self.Config.UI.ToggleKey,
 
         DisableRayfieldPrompts = true,
         DisableBuildWarnings = false,
@@ -81,184 +230,32 @@ function UI:CreateWindow()
     })
 
     if not Window then
-        error("[Pcd Fnl Boss] Rayfield failed to create the window")
+        error("[Pcd Fnl Boss] Rayfield failed to create window")
     end
 
     self.Window = Window
 
-    --------------------------------------------------
-    -- MAIN
-    --------------------------------------------------
-
     local MainTab = Window:CreateTab("Main", 0)
 
-    MainTab:CreateSection("Auto Buy")
+    for _, shopKey in ipairs(self.Config.ShopOrder) do
+        self:CreateShopControls(MainTab, shopKey)
+    end
 
-    MainTab:CreateToggle({
-        Name = "Auto Buy Capybaras",
-        CurrentValue = false,
-        Flag = "AutoBuyCapybaras",
-
-        Callback = function(value)
-            self.Core.State.AutoBuyCapybaras = value
-
-            if value then
-                self.AutoBuy:StartCapybaras()
-            else
-                self.AutoBuy:StopCapybaras()
-            end
-        end,
-    })
-
-    MainTab:CreateToggle({
-        Name = "Auto Buy Gears",
-        CurrentValue = false,
-        Flag = "AutoBuyGears",
-
-        Callback = function(value)
-            self.Core.State.AutoBuyGears = value
-
-            if value then
-                self.AutoBuy:StartGears()
-            else
-                self.AutoBuy:StopGears()
-            end
-        end,
-    })
-
-    MainTab:CreateDropdown({
-        Name = "Select Merchant Items",
-        Options = self.Config.MerchantItems,
-        CurrentOption = {},
-        MultipleOptions = true,
-        Flag = "SelectedMerchantItems",
-
-        Callback = function(options)
-            self.Core:SetMerchantSelection(options)
-        end,
-    })
-
-    MainTab:CreateToggle({
-        Name = "Auto Buy Merchant",
-        CurrentValue = false,
-        Flag = "AutoBuyMerchant",
-
-        Callback = function(value)
-            self.Core.State.AutoBuyMerchant = value
-
-            if value then
-                self.AutoBuy:StartMerchant()
-            else
-                self.AutoBuy:StopMerchant()
-            end
-        end,
-    })
-
-    MainTab:CreateSection("Bosses")
-
-    MainTab:CreateDropdown({
-        Name = "Select Boss",
-        Options = self.Config.NormalBosses,
-        CurrentOption = {self.Core.State.SelectedBoss},
-        MultipleOptions = false,
-        Flag = "SelectedBoss",
-
-        Callback = function(options)
-            local selected = type(options) == "table" and options[1] or options
-
-            if type(selected) == "string" and selected ~= "" then
-                self.Core.State.SelectedBoss = selected
-            end
-        end,
-    })
-
-    MainTab:CreateToggle({
-        Name = "Auto Summon Boss",
-        CurrentValue = false,
-        Flag = "AutoSummonBoss",
-
-        Callback = function(value)
-            self.Core.State.AutoBoss = value
-
-            if value then
-                self.Bosses:StartNormal()
-            else
-                self.Bosses:StopNormal()
-            end
-        end,
-    })
-
-    MainTab:CreateButton({
-        Name = "Summon Selected Boss",
-
-        Callback = function()
-            local boss = self.Core.State.SelectedBoss
-
-            if boss then
-                self.Bosses:Summon(boss)
-            end
-        end,
-    })
-
-    --------------------------------------------------
-    -- EVENT
-    --------------------------------------------------
+    self:CreateBossControls(MainTab, "Normal")
 
     local EventTab = Window:CreateTab("Event", 0)
+    self:CreateBossControls(EventTab, "Event")
 
-    EventTab:CreateSection("Dr Carrot Challenge")
-
-    EventTab:CreateDropdown({
-        Name = "Select Event Boss",
-        Options = self.Config.EventBosses,
-        CurrentOption = {self.Core.State.SelectedEventBoss},
-        MultipleOptions = false,
-        Flag = "SelectedEventBoss",
-
-        Callback = function(options)
-            local selected = type(options) == "table" and options[1] or options
-
-            if type(selected) == "string" and selected ~= "" then
-                self.Core.State.SelectedEventBoss = selected
-            end
-        end,
-    })
-
-    EventTab:CreateToggle({
-        Name = "Auto Summon Event Boss",
-        CurrentValue = false,
-        Flag = "AutoSummonEventBoss",
-
-        Callback = function(value)
-            self.Core.State.AutoEvent = value
-
-            if value then
-                self.Bosses:StartEvent()
-            else
-                self.Bosses:StopEvent()
-            end
-        end,
-    })
-
-    EventTab:CreateButton({
-        Name = "Summon Selected Event Boss",
-
-        Callback = function()
-            local boss = self.Core.State.SelectedEventBoss
-
-            if boss then
-                self.Bosses:Summon(boss)
-            end
-        end,
-    })
+    self:StartDynamicDropdownSync()
 
     Rayfield:Notify({
-        Title = self.Config.Title,
-        Content = "Loaded v" .. self.Config.Version .. " • by " .. self.Config.Author,
+        Title = self.Config.UI.Title,
+        Content =
+            "Loaded v" .. self.Config.Version .. " • by " .. self.Config.UI.Author,
         Duration = 4,
     })
 
-    print("[Pcd Fnl Boss] Rayfield interface created successfully")
+    print("[Pcd Fnl Boss] Rayfield interface ready")
 end
 
 return UI
