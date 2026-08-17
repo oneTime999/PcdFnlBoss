@@ -4,48 +4,75 @@ function Bosses:Init(App)
     self.App = App
     self.Core = App.Core
     self.Config = App.Config
+    self.EventIndex = 1
 end
 
 function Bosses:Summon(name)
-    local remote = self.Core.Remotes:FindFirstChild("SummonBoss")
-
-    if not remote then
-        return
+    if type(name) ~= "string" or name == "" then
+        return false, "Invalid boss name"
     end
 
-    pcall(function()
-        remote:InvokeServer(
-            "Summon",
-            name
-        )
-    end)
+    return self.Core:CallRemote(
+        "SummonBoss",
+        self.Config.BossRemoteDelay,
+        "Summon",
+        name
+    )
 end
 
 function Bosses:StartNormal()
     self.Core:StartWorker("NormalBoss", function()
         if not self.Core.State.AutoBoss then
-            self.Core:StopWorker("NormalBoss")
-            return
+            return false
         end
 
-        self:Summon(self.Core.State.SelectedBoss)
+        local boss = self.Core.State.SelectedBoss
 
-        task.wait(self.Config.BossInterval)
+        if boss then
+            self:Summon(boss)
+        end
+
+        return self.Config.BossInterval
     end)
 end
 
+function Bosses:StopNormal()
+    self.Core:StopWorker("NormalBoss")
+end
+
 function Bosses:StartEvent()
+    self.EventIndex = 1
+
     self.Core:StartWorker("EventBoss", function()
-        for _, boss in ipairs(self.Config.EventBosses) do
-            if not self.Core.State.AutoEvent then
-                break
-            end
-
-            self:Summon(boss)
-
-            task.wait(self.Config.BossInterval)
+        if not self.Core.State.AutoEvent then
+            return false
         end
+
+        local bosses = self.Config.EventBosses
+
+        if #bosses == 0 then
+            return false
+        end
+
+        if self.EventIndex > #bosses then
+            self.EventIndex = 1
+        end
+
+        local boss = bosses[self.EventIndex]
+        self:Summon(boss)
+
+        self.EventIndex = self.EventIndex + 1
+
+        if self.EventIndex > #bosses then
+            self.EventIndex = 1
+        end
+
+        return self.Config.BossInterval
     end)
+end
+
+function Bosses:StopEvent()
+    self.Core:StopWorker("EventBoss")
 end
 
 return Bosses
