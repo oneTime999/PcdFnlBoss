@@ -126,6 +126,18 @@ function UI:CreateWindow()
         end,
     })
 
+    MainTab:CreateDropdown({
+        Name = "Select Merchant Items",
+        Options = self.Config.MerchantItems,
+        CurrentOption = {},
+        MultipleOptions = true,
+        Flag = "SelectedMerchantItems",
+
+        Callback = function(options)
+            self.Core:SetMerchantSelection(options)
+        end,
+    })
+
     MainTab:CreateToggle({
         Name = "Auto Buy Merchant",
         CurrentValue = false,
@@ -142,16 +154,6 @@ function UI:CreateWindow()
         end,
     })
 
-    MainTab:CreateToggle({
-        Name = "Buy Every Merchant Item",
-        CurrentValue = true,
-        Flag = "MerchantBuyAll",
-
-        Callback = function(value)
-            self.Core.State.MerchantBuyAll = value
-        end,
-    })
-
     MainTab:CreateSection("Bosses")
 
     MainTab:CreateDropdown({
@@ -162,13 +164,7 @@ function UI:CreateWindow()
         Flag = "SelectedBoss",
 
         Callback = function(options)
-            local selected
-
-            if type(options) == "table" then
-                selected = options[1]
-            elseif type(options) == "string" then
-                selected = options
-            end
+            local selected = type(options) == "table" and options[1] or options
 
             if type(selected) == "string" and selected ~= "" then
                 self.Core.State.SelectedBoss = selected
@@ -212,10 +208,26 @@ function UI:CreateWindow()
 
     EventTab:CreateSection("Dr Carrot Challenge")
 
+    EventTab:CreateDropdown({
+        Name = "Select Event Boss",
+        Options = self.Config.EventBosses,
+        CurrentOption = {self.Core.State.SelectedEventBoss},
+        MultipleOptions = false,
+        Flag = "SelectedEventBoss",
+
+        Callback = function(options)
+            local selected = type(options) == "table" and options[1] or options
+
+            if type(selected) == "string" and selected ~= "" then
+                self.Core.State.SelectedEventBoss = selected
+            end
+        end,
+    })
+
     EventTab:CreateToggle({
-        Name = "Auto Challenge Dr. Carrot",
+        Name = "Auto Summon Event Boss",
         CurrentValue = false,
-        Flag = "AutoChallengeDrCarrot",
+        Flag = "AutoSummonEventBoss",
 
         Callback = function(value)
             self.Core.State.AutoEvent = value
@@ -228,35 +240,15 @@ function UI:CreateWindow()
         end,
     })
 
-    EventTab:CreateSection("Challenge Rotation")
-
-    EventTab:CreateLabel(
-        "Dr Carrot → Dr Carrot MkI → Dr Carrot MkII → Dr Carrot MkIII"
-    )
-
-    --------------------------------------------------
-    -- CONTROL
-    --------------------------------------------------
-
-    MainTab:CreateSection("Control")
-
-    MainTab:CreateButton({
-        Name = "Disable All Automation",
+    EventTab:CreateButton({
+        Name = "Summon Selected Event Boss",
 
         Callback = function()
-            self.Core.State.AutoBuyCapybaras = false
-            self.Core.State.AutoBuyGears = false
-            self.Core.State.AutoBuyMerchant = false
-            self.Core.State.AutoBoss = false
-            self.Core.State.AutoEvent = false
+            local boss = self.Core.State.SelectedEventBoss
 
-            self.Core:StopAll()
-
-            Rayfield:Notify({
-                Title = "Pcd Fnl Boss",
-                Content = "All automation workers were stopped.",
-                Duration = 4,
-            })
+            if boss then
+                self.Bosses:Summon(boss)
+            end
         end,
     })
 
