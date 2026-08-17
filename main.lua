@@ -1,5 +1,5 @@
 local BASE_URL = "https://raw.githubusercontent.com/oneTime999/PcdFnlBoss/refs/heads/main/src/"
-local BUILD = "1.3.0"
+local BUILD = "1.4.0"
 
 local ENV = (getgenv and getgenv()) or _G
 local CACHE_BUSTER = tostring(os.time()) .. "-" .. tostring(math.random(100000, 999999))
@@ -16,6 +16,13 @@ local function safeCleanup(app)
     end)
 
     pcall(function()
+        if app.Rayfield and app.Rayfield.Destroy then
+            app.Rayfield:Destroy()
+        end
+    end)
+
+    -- Compatibility cleanup for builds that still used Starlight.
+    pcall(function()
         if app.Starlight and app.Starlight.Destroy then
             app.Starlight:Destroy()
         end
@@ -25,7 +32,7 @@ end
 if ENV.PcdFnlBossApp then
     safeCleanup(ENV.PcdFnlBossApp)
     ENV.PcdFnlBossApp = nil
-    task.wait(0.1)
+    task.wait(0.15)
 end
 
 local function loadModule(name)
@@ -44,7 +51,9 @@ local function loadModule(name)
     end
 
     local lower = string.lower(source:sub(1, 200))
-    if string.find(lower, "<!doctype", 1, true) or string.find(lower, "<html", 1, true) then
+
+    if string.find(lower, "<!doctype", 1, true)
+        or string.find(lower, "<html", 1, true) then
         error("[Pcd Fnl Boss] Invalid HTML response while loading module: " .. name)
     end
 
