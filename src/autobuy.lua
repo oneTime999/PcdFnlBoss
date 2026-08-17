@@ -19,7 +19,7 @@ function AutoBuy:GetPlayerGui()
         return nil
     end
 
-    return player:FindFirstChild("PlayerGui")
+    return player:FindFirstChildOfClass("PlayerGui") or player:FindFirstChild("PlayerGui")
 end
 
 function AutoBuy:GetFrames()
@@ -51,7 +51,7 @@ function AutoBuy:GetShopList(shopName)
         return nil
     end
 
-    local shop = frames:FindFirstChild(shopName)
+    local shop = frames:FindFirstChild(shopName) or frames:FindFirstChild(shopName, true)
 
     if not shop then
         return nil
@@ -60,52 +60,63 @@ function AutoBuy:GetShopList(shopName)
     return shop:FindFirstChild("List", true)
 end
 
-function AutoBuy:GetMerchantNPC()
-    local world = workspace:FindFirstChild("World")
-
-    if not world then
-        return nil
-    end
-
-    local map = world:FindFirstChild("Map")
-
-    if not map then
-        return nil
-    end
-
-    local npcs = map:FindFirstChild("NPCs")
-
-    if not npcs then
-        return nil
-    end
-
-    return npcs:FindFirstChild("MerchantNPC")
-end
-
 function AutoBuy:GetText(instance)
     if not instance then
         return nil
     end
 
-    local success, text = pcall(function()
-        return instance.Text
-    end)
-
-    if success and type(text) == "string" then
-        return text
+    if not instance:IsA("TextLabel")
+        and not instance:IsA("TextButton")
+        and not instance:IsA("TextBox") then
+        return nil
     end
 
-    return nil
+    local text = instance.Text
+
+    if type(text) ~= "string" or text == "" then
+        return nil
+    end
+
+    return text
 end
 
 function AutoBuy:GetItemName(item)
-    local title = item:FindFirstChild("Title", true)
+    local candidates = {
+        "Title",
+        "ItemName",
+        "ItemTitle",
+        "NameLabel",
+        "DisplayName",
+    }
 
-    if title then
-        local text = self:GetText(title)
+    for _, candidate in ipairs(candidates) do
+        local object = item:FindFirstChild(candidate, true)
+        local text = self:GetText(object)
 
-        if text and text ~= "" then
+        if text then
             return text
+        end
+    end
+
+    for _, object in ipairs(item:GetDescendants()) do
+        local text = self:GetText(object)
+
+        if text then
+            local objectName = string.lower(object.Name)
+            local lowerText = string.lower(text)
+
+            local ignored =
+                objectName == "stock"
+                or objectName == "price"
+                or objectName == "cost"
+                or objectName == "amount"
+                or string.find(lowerText, "in stock", 1, true)
+                or string.find(lowerText, "no stock", 1, true)
+                or string.find(lowerText, "sold out", 1, true)
+
+            if not ignored then
+                return text
+            end
         end
     end
 
@@ -117,27 +128,46 @@ function AutoBuy:ParseStock(stockText)
         return 0, false
     end
 
-    local normalized = string.upper(stockText)
+    local normalized = string.upper(stockText):gsub(",", "")
 
-    if string.find(normalized, "NO STOCK", 1, true) then
+    if string.find(normalized, "NO STOCK", 1, true)
+        or string.find(normalized, "OUT OF STOCK", 1, true)
+        or string.find(normalized, "SOLD OUT", 1, true)
+        or string.find(normalized, "UNAVAILABLE", 1, true) then
         return 0, false
     end
 
-    local amount = string.match(stockText, "[xX]%s*(%d+)")
+    local amount =
+        normalized:match("X%s*(%d+)")
+        or normalized:match("(%d+)%s*X")
+        or normalized:match("STOCK%s*[:%-]?%s*(%d+)")
+
+    amount = tonumber(amount)
 
     if amount then
-        amount = tonumber(amount)
-
-        if amount and amount > 0 then
-            return amount, true
-        end
+        return amount, amount > 0
     end
 
-    if string.find(normalized, "IN STOCK", 1, true) then
+    if string.find(normalized, "IN STOCK", 1, true)
+        or string.find(normalized, "AVAILABLE", 1, true) then
         return 1, true
     end
 
     return 0, false
+end
+
+function AutoBuy:GetCardFromStock(list, stockObject)
+    local current = stockObject
+
+    while current and current.Parent and current.Parent ~= list do
+        current = current.Parent
+    end
+
+    if current and current.Parent == list and current:IsA("GuiObject") then
+        return current
+    end
+
+    return nil
 end
 
 function AutoBuy:GetStockEntries(list)
@@ -147,23 +177,27 @@ function AutoBuy:GetStockEntries(list)
         return entries
     end
 
-    for _, item in ipairs(list:GetChildren()) do
-        if item:IsA("GuiObject") then
-            local stockObject = item:FindFirstChild("Stock", true)
+    local seen = {}
 
-            if stockObject then
-                local stockText = self:GetText(stockObject)
+    for _, object in ipairs(list:GetDescendants()) do
+        if object.Name == "Stock" then
+            local stockText = self:GetText(object)
 
-                if stockText then
+            if stockText then
+                local card = self:GetCardFromStock(list, object)
+
+                if card and not seen[card] then
+                    seen[card] = true
+
                     local amount, inStock = self:ParseStock(stockText)
 
-                    table.insert(entries, {
-                        instance = item,
-                        name = self:GetItemName(item),
-                        stock = stockText,
-                        amount = amount,
-                        inStock = inStock,
-                    })
+                    entries[#entries + 1] = {
+                        Instance = card,
+                        Name = self:GetItemName(card),
+                        StockText = stockText,
+                        Amount = amount,
+                        InStock = inStock,
+                    }
                 end
             end
         end
@@ -172,38 +206,28 @@ function AutoBuy:GetStockEntries(list)
     return entries
 end
 
-function AutoBuy:CallRemote(remoteName, itemName)
-    local remote = self.Core.Remotes:FindFirstChild(remoteName)
-
-    if not remote then
-        return false
-    end
-
-    local success = pcall(function()
-        if remote:IsA("RemoteEvent") then
-            remote:FireServer(itemName)
-        elseif remote:IsA("RemoteFunction") then
-            remote:InvokeServer(itemName)
-        end
-    end)
-
-    return success
-end
-
 function AutoBuy:BuyItem(itemName)
-    return self:CallRemote("BuyItem", itemName)
+    return self.Core:CallRemote(
+        "BuyItem",
+        self.Config.BuyRemoteDelay,
+        itemName
+    )
 end
 
 function AutoBuy:BuyMerchantItem(itemName)
-    return self:CallRemote("BuyMerchantItem", itemName)
+    return self.Core:CallRemote(
+        "BuyMerchantItem",
+        self.Config.BuyRemoteDelay,
+        itemName
+    )
 end
 
-function AutoBuy:PurchaseEntry(entry, buyFunction, stateKey)
-    if not entry.inStock then
+function AutoBuy:PurchaseEntry(entry, stateKey, buyer)
+    if not entry or not entry.InStock then
         return
     end
 
-    local amount = tonumber(entry.amount) or 0
+    local amount = tonumber(entry.Amount) or 0
 
     if amount <= 0 then
         return
@@ -214,48 +238,60 @@ function AutoBuy:PurchaseEntry(entry, buyFunction, stateKey)
             return
         end
 
-        local success = buyFunction(entry.name)
+        local ok, result = buyer(entry.Name)
 
-        if not success then
-            break
+        if not ok or result == false then
+            return
+        end
+    end
+end
+
+function AutoBuy:RunShop(shopName, stateKey, buyer, predicate)
+    local list = self:GetShopList(shopName)
+
+    if not list then
+        self.Core:WarnThrottled(
+            "Shop:" .. shopName,
+            "Shop list not found: " .. shopName,
+            10
+        )
+        return
+    end
+
+    local entries = self:GetStockEntries(list)
+
+    for _, entry in ipairs(entries) do
+        if not self.Core.State[stateKey] then
+            return
         end
 
-        task.wait(0.15)
+        local shouldBuy = true
+
+        if predicate then
+            shouldBuy = predicate(entry)
+        end
+
+        if shouldBuy then
+            self:PurchaseEntry(entry, stateKey, buyer)
+        end
     end
 end
 
 function AutoBuy:StartCapybaras()
     self.Core:StartWorker("AutoBuyCapybaras", function()
         if not self.Core.State.AutoBuyCapybaras then
-            self.Core:StopWorker("AutoBuyCapybaras")
-            return
+            return false
         end
 
-        local list = self:GetShopList("EggShop")
-
-        if list then
-            local entries = self:GetStockEntries(list)
-
-            for _, entry in ipairs(entries) do
-                if not self.Core.State.AutoBuyCapybaras then
-                    return
-                end
-
-                local name = string.lower(entry.name)
-
-                if string.find(name, "egg", 1, true) then
-                    self:PurchaseEntry(
-                        entry,
-                        function(itemName)
-                            return self:BuyItem(itemName)
-                        end,
-                        "AutoBuyCapybaras"
-                    )
-                end
+        self:RunShop(
+            self.Config.ShopNames.Capybaras,
+            "AutoBuyCapybaras",
+            function(itemName)
+                return self:BuyItem(itemName)
             end
-        end
+        )
 
-        task.wait(self.Config.BuyInterval)
+        return self.Config.BuyInterval
     end)
 end
 
@@ -266,31 +302,18 @@ end
 function AutoBuy:StartGears()
     self.Core:StartWorker("AutoBuyGears", function()
         if not self.Core.State.AutoBuyGears then
-            self.Core:StopWorker("AutoBuyGears")
-            return
+            return false
         end
 
-        local list = self:GetShopList("GearShop")
-
-        if list then
-            local entries = self:GetStockEntries(list)
-
-            for _, entry in ipairs(entries) do
-                if not self.Core.State.AutoBuyGears then
-                    return
-                end
-
-                self:PurchaseEntry(
-                    entry,
-                    function(itemName)
-                        return self:BuyItem(itemName)
-                    end,
-                    "AutoBuyGears"
-                )
+        self:RunShop(
+            self.Config.ShopNames.Gears,
+            "AutoBuyGears",
+            function(itemName)
+                return self:BuyItem(itemName)
             end
-        end
+        )
 
-        task.wait(self.Config.BuyInterval)
+        return self.Config.BuyInterval
     end)
 end
 
@@ -301,40 +324,25 @@ end
 function AutoBuy:StartMerchant()
     self.Core:StartWorker("AutoBuyMerchant", function()
         if not self.Core.State.AutoBuyMerchant then
-            self.Core:StopWorker("AutoBuyMerchant")
-            return
+            return false
         end
 
-        if not self:GetMerchantNPC() then
-            task.wait(self.Config.BuyInterval)
-            return
-        end
-
-        local list = self:GetShopList("MerchantShop")
-
-        if list then
-            local entries = self:GetStockEntries(list)
-
-            for _, entry in ipairs(entries) do
-                if not self.Core.State.AutoBuyMerchant then
-                    return
+        self:RunShop(
+            self.Config.ShopNames.Merchant,
+            "AutoBuyMerchant",
+            function(itemName)
+                return self:BuyMerchantItem(itemName)
+            end,
+            function(entry)
+                if self.Core.State.MerchantBuyAll then
+                    return true
                 end
 
-                local normalizedName = string.lower(entry.name)
-
-                if self.MerchantLookup[normalizedName] then
-                    self:PurchaseEntry(
-                        entry,
-                        function(itemName)
-                            return self:BuyMerchantItem(itemName)
-                        end,
-                        "AutoBuyMerchant"
-                    )
-                end
+                return self.MerchantLookup[string.lower(entry.Name)] == true
             end
-        end
+        )
 
-        task.wait(self.Config.BuyInterval)
+        return self.Config.BuyInterval
     end)
 end
 
