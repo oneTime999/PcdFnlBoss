@@ -4,12 +4,6 @@ function AutoBuy:Init(App)
     self.App = App
     self.Core = App.Core
     self.Config = App.Config
-
-    self.MerchantLookup = {}
-
-    for _, itemName in ipairs(self.Config.MerchantItems) do
-        self.MerchantLookup[string.lower(itemName)] = true
-    end
 end
 
 function AutoBuy:GetPlayerGui()
@@ -334,11 +328,7 @@ function AutoBuy:StartMerchant()
                 return self:BuyMerchantItem(itemName)
             end,
             function(entry)
-                if self.Core.State.MerchantBuyAll then
-                    return true
-                end
-
-                return self.MerchantLookup[string.lower(entry.Name)] == true
+                return self.Core:IsMerchantSelected(entry.Name)
             end
         )
 
