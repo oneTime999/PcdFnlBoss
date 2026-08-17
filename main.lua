@@ -1,5 +1,5 @@
-llocal BASE_URL = "https://raw.githubusercontent.com/oneTime999/PcdFnlBoss/refs/heads/main/src/"
-local BUILD = "1.2.0"
+local BASE_URL = "https://raw.githubusercontent.com/oneTime999/PcdFnlBoss/refs/heads/main/src/"
+local BUILD = "1.2.1"
 
 local ENV = getgenv and getgenv() or _G
 
@@ -60,6 +60,8 @@ local function LoadModule(name)
     return module
 end
 
+print("[Pcd Fnl Boss] Starting v" .. BUILD)
+
 local Config = LoadModule("config")
 local Core = LoadModule("core")
 local AutoBuy = LoadModule("autobuy")
@@ -79,6 +81,10 @@ ENV.PcdFnlBossApp = App
 Core:Init(App)
 AutoBuy:Init(App)
 Bosses:Init(App)
+
+print("[Pcd Fnl Boss] Modules loaded")
+print("[Pcd Fnl Boss] Creating interface...")
+
 UI:Init(App)
 
-print("[Pcd Fnl Boss] Loaded successfully - v" .. BUILD)
+print("[Pcd Fnl Boss] Successfully loaded v" .. BUILD)
