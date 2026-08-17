@@ -24,11 +24,14 @@ function Core:Init(App)
         AutoBuyCapybaras = false,
         AutoBuyGears = false,
         AutoBuyMerchant = false,
-        MerchantBuyAll = true,
+
+        SelectedMerchantItems = {},
 
         AutoBoss = false,
-        AutoEvent = false,
         SelectedBoss = App.Config.NormalBosses[1],
+
+        AutoEvent = false,
+        SelectedEventBoss = App.Config.EventBosses[1],
     }
 
     self.Workers = {}
@@ -121,12 +124,34 @@ function Core:StopAll()
     end
 
     if self.State then
-        for key, value in pairs(self.State) do
-            if type(value) == "boolean" and key ~= "MerchantBuyAll" then
-                self.State[key] = false
+        self.State.AutoBuyCapybaras = false
+        self.State.AutoBuyGears = false
+        self.State.AutoBuyMerchant = false
+        self.State.AutoBoss = false
+        self.State.AutoEvent = false
+    end
+end
+
+function Core:SetMerchantSelection(options)
+    local selected = {}
+
+    if type(options) == "table" then
+        for _, itemName in ipairs(options) do
+            if type(itemName) == "string" and itemName ~= "" then
+                selected[string.lower(itemName)] = true
             end
         end
     end
+
+    self.State.SelectedMerchantItems = selected
+end
+
+function Core:IsMerchantSelected(itemName)
+    if type(itemName) ~= "string" then
+        return false
+    end
+
+    return self.State.SelectedMerchantItems[string.lower(itemName)] == true
 end
 
 function Core:GetRemote(name)
