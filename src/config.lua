@@ -2,7 +2,7 @@ local Config = {}
 
 Config.Title = "Pcd Fnl Boss"
 Config.Author = "onetime.999"
-Config.Version = "1.4.0"
+Config.Version = "1.5.0"
 
 Config.BuyInterval = 1.5
 Config.BuyRemoteDelay = 0.15
