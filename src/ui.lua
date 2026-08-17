@@ -11,35 +11,212 @@ function UI:Init(App)
 end
 
 function UI:CreateWindow()
+    getgenv().InterfaceName = "PcdFnlBoss"
 
-    -- carregar Starlight
+    local success, Starlight = pcall(function()
+        return loadstring(
+            game:HttpGet(
+                "https://raw.nebulasoftworks.xyz/starlight"
+            )
+        )()
+    end)
 
-    -- Window
-    -- título: Pcd Fnl Boss
-    -- autor: onetime.999
+    if not success or not Starlight then
+        error(
+            "[Pcd Fnl Boss] Failed to load Starlight: " ..
+            tostring(Starlight)
+        )
+    end
 
-    ------------------------------------------------
+    self.Starlight = Starlight
+    self.App.Starlight = Starlight
 
-    -- TAB MAIN
+    local Window = Starlight:CreateWindow({
+        Name = self.Config.Title,
+        Subtitle = "by " .. self.Config.Author,
 
-    -- Auto Buy Capybaras
-    -- Auto Buy Gears
-    -- Auto Buy Merchant
+        LoadingEnabled = false,
 
-    -- Boss Dropdown
+        BuildWarnings = true,
+        InterfaceAdvertisingPrompts = false,
+        NotifyOnCallbackError = true,
 
-    -- Auto Summon Boss
+        FileSettings = {
+            ConfigFolder = "PcdFnlBoss",
+        },
+    })
 
-    -- Summon Selected Boss
+    self.Window = Window
 
-    ------------------------------------------------
+    local Navigation = Window:CreateTabSection(
+        "Pcd Fnl Boss",
+        true
+    )
 
-    -- TAB EVENT
+    local MainTab = Navigation:CreateTab({
+        Name = "Main",
+        Columns = 2,
+    }, "Main")
 
-    -- Auto Challenge Dr. Carrot
+    local EventTab = Navigation:CreateTab({
+        Name = "Event",
+        Columns = 1,
+    }, "Event")
 
-    ------------------------------------------------
+    --------------------------------------------------
+    -- MAIN / AUTO BUY
+    --------------------------------------------------
 
+    local AutoBuyGroup = MainTab:CreateGroupbox({
+        Name = "Auto Buy",
+        Column = 1,
+    }, "AutoBuy")
+
+    AutoBuyGroup:CreateToggle({
+        Name = "Auto Buy Capybaras",
+        CurrentValue = false,
+        Style = 2,
+
+        Callback = function(value)
+            self.Core.State.AutoBuyCapybaras = value
+
+            if value then
+                self.AutoBuy:StartCapybaras()
+            else
+                self.AutoBuy:StopCapybaras()
+            end
+        end,
+    }, "AutoBuyCapybaras")
+
+    AutoBuyGroup:CreateToggle({
+        Name = "Auto Buy Gears",
+        CurrentValue = false,
+        Style = 2,
+
+        Callback = function(value)
+            self.Core.State.AutoBuyGears = value
+
+            if value then
+                self.AutoBuy:StartGears()
+            else
+                self.AutoBuy:StopGears()
+            end
+        end,
+    }, "AutoBuyGears")
+
+    AutoBuyGroup:CreateToggle({
+        Name = "Auto Buy Merchant",
+        CurrentValue = false,
+        Style = 2,
+
+        Callback = function(value)
+            self.Core.State.AutoBuyMerchant = value
+
+            if value then
+                self.AutoBuy:StartMerchant()
+            else
+                self.AutoBuy:StopMerchant()
+            end
+        end,
+    }, "AutoBuyMerchant")
+
+    --------------------------------------------------
+    -- MAIN / BOSSES
+    --------------------------------------------------
+
+    local BossGroup = MainTab:CreateGroupbox({
+        Name = "Bosses",
+        Column = 2,
+    }, "Bosses")
+
+    BossGroup:CreateDropdown({
+        Name = "Select Boss",
+
+        Options = self.Config.NormalBosses,
+
+        CurrentOption = self.Core.State.SelectedBoss,
+
+        MultipleOptions = false,
+
+        Callback = function(value)
+            if type(value) == "table" then
+                value = value[1]
+            end
+
+            if type(value) == "string" and value ~= "" then
+                self.Core.State.SelectedBoss = value
+            end
+        end,
+    })
+
+    BossGroup:CreateToggle({
+        Name = "Auto Summon Boss",
+        CurrentValue = false,
+        Style = 2,
+
+        Callback = function(value)
+            self.Core.State.AutoBoss = value
+
+            if value then
+                self.Bosses:StartNormal()
+            else
+                self.Core:StopWorker("NormalBoss")
+            end
+        end,
+    }, "AutoSummonBoss")
+
+    BossGroup:CreateButton({
+        Name = "Summon Selected Boss",
+
+        Callback = function()
+            local boss = self.Core.State.SelectedBoss
+
+            if boss then
+                self.Bosses:Summon(boss)
+            end
+        end,
+    }, "SummonSelectedBoss")
+
+    --------------------------------------------------
+    -- EVENT
+    --------------------------------------------------
+
+    local EventGroup = EventTab:CreateGroupbox({
+        Name = "Dr Carrot Challenge",
+        Column = 1,
+    }, "DrCarrotChallenge")
+
+    EventGroup:CreateToggle({
+        Name = "Auto Challenge Dr. Carrot",
+        CurrentValue = false,
+        Style = 2,
+
+        Callback = function(value)
+            self.Core.State.AutoEvent = value
+
+            if value then
+                self.Bosses:StartEvent()
+            else
+                self.Core:StopWorker("EventBoss")
+            end
+        end,
+    }, "AutoChallengeDrCarrot")
+
+    --------------------------------------------------
+    -- CLEANUP
+    --------------------------------------------------
+
+    Starlight:OnDestroy(function()
+        self.Core:StopAll()
+
+        local env = getgenv and getgenv() or _G
+
+        if env.PcdFnlBossApp == self.App then
+            env.PcdFnlBossApp = nil
+        end
+    end)
+
+    print("[Pcd Fnl Boss] Interface created.")
 end
 
 return UI
