@@ -2,9 +2,19 @@ local Config = {}
 
 Config.Title = "Pcd Fnl Boss"
 Config.Author = "onetime.999"
+Config.Version = "1.3.0"
 
 Config.BuyInterval = 1.5
+Config.BuyRemoteDelay = 0.15
 Config.BossInterval = 2.5
+Config.BossRemoteDelay = 1.25
+Config.WorkerErrorDelay = 1.0
+
+Config.ShopNames = {
+    Capybaras = "EggShop",
+    Gears = "GearShop",
+    Merchant = "MerchantShop",
+}
 
 Config.NormalBosses = {
     "Scarlet Carrot",
